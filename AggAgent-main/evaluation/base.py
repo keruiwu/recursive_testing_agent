@@ -63,6 +63,8 @@ class Evaluator(ABC):
         if is_hf_local_model(llm):
             # Local HF judge mode (no API/localhost dependency).
             # response_format and other litellm-only kwargs in `extra` are ignored.
+            hf_device_map = os.getenv("HF_LOCAL_DEVICE_MAP", "auto")
+            hf_torch_dtype = os.getenv("HF_LOCAL_TORCH_DTYPE") or None
             text = await asyncio.to_thread(
                 hf_chat_completion_text,
                 messages,
@@ -71,6 +73,8 @@ class Evaluator(ABC):
                     max_new_tokens=max_tokens,
                     temperature=0.0,
                     top_p=1.0,
+                    device_map=hf_device_map,
+                    torch_dtype=hf_torch_dtype,
                 ),
             )
             return text

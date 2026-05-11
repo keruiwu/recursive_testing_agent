@@ -170,6 +170,11 @@ def main():
         os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices
     if args.eval_api_base:
         os.environ["EVAL_API_BASE"] = args.eval_api_base
+    # Share local-HF loading config with evaluator local judge path, so it can
+    # reuse the same model cache key and avoid duplicate model loads.
+    os.environ["HF_LOCAL_DEVICE_MAP"] = args.hf_device_map
+    if args.hf_torch_dtype:
+        os.environ["HF_LOCAL_TORCH_DTYPE"] = args.hf_torch_dtype
 
     # Find all leaf directories from the given parent directories
     all_leaves = []
