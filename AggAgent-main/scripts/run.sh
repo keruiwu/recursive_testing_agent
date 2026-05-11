@@ -1,4 +1,5 @@
 #!/bin/bash
+source ~/scratch/miniconda3/etc/profile.d/conda.sh
 conda activate aggagent
 cd /gpfs/u/scratch/MPRG/MPRGhhzz/kerui/recursive_testing_agent/AggAgent-main
 export HF_HUB_OFFLINE=1
