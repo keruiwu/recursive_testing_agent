@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import os
 import re
 from typing import Dict
 
-import litellm
 from dotenv import load_dotenv
 
 from .base import Evaluator
@@ -103,24 +101,13 @@ class BrowseCompEvaluator(Evaluator):
 
         judge_prompt = self.build_prompt(prediction, item)
 
-        body = {
-            "model": "gpt-4.1",
-            "max_tokens": 1024,
-            "messages": [{"role": "user", "content": judge_prompt}]
-        }
-
-        if "gemini" in llm:
-            body["model"] = f"gemini/{llm}"
-            body["api_key"] = os.getenv("GEMINI_API_KEY")
-        elif "gpt" in llm:
-            body["model"] = f"openai/{llm}"
-            body["api_key"] = os.getenv("OPENAI_API_KEY")
-        else:
-            body["api_key"] = "EMPTY"
-
         try:
-            judge_response = await litellm.acompletion(**body)
-            judge_text = judge_response.choices[0].message.content
+            judge_text = await self.async_complete(
+                [{"role": "user", "content": judge_prompt}],
+                llm,
+                max_tokens=1024,
+                temperature=0.0,
+            )
 
             result = self.parse_response(judge_text)
             if "confidence" not in result:

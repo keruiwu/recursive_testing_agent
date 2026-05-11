@@ -6,10 +6,9 @@ import re
 import textwrap
 from typing import Dict, List, Tuple
 
-import litellm
 from dotenv import load_dotenv
 
-from .base import Evaluator, _build_litellm_body
+from .base import Evaluator
 
 load_dotenv()
 
@@ -236,15 +235,13 @@ class DeepSearchQAEvaluator(Evaluator):
 
         judge_prompt = self.build_prompt(prediction, item)
 
-        body = _build_litellm_body(
-            llm=llm,
-            messages=[{"role": "user", "content": judge_prompt}],
-            max_tokens=1024,
-        )
-
         try:
-            judge_response = await litellm.acompletion(**body)
-            judge_text = judge_response.choices[0].message.content
+            judge_text = await self.async_complete(
+                [{"role": "user", "content": judge_prompt}],
+                llm,
+                max_tokens=1024,
+                temperature=0.0,
+            )
 
             result = self.parse_response(judge_text)
             if "confidence" not in result:

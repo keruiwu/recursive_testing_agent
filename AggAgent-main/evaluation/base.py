@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import asyncio
 import json
 import os
 import re
 from typing import Any, Dict, Optional
 
 import litellm
+from aggagent.local_hf import (
+    HFGenerateKwargs,
+    hf_chat_completion_text,
+    is_hf_local_model,
+    parse_hf_model_id,
+)
 
 
 CONFIDENCE_EXTRACTION_PROMPT = """Extract the confidence score from the AI response below.
@@ -53,6 +60,20 @@ class Evaluator(ABC):
         if self._completer is not None:
             result = await self._completer(messages)
             return result["content"]
+        if is_hf_local_model(llm):
+            # Local HF judge mode (no API/localhost dependency).
+            # response_format and other litellm-only kwargs in `extra` are ignored.
+            text = await asyncio.to_thread(
+                hf_chat_completion_text,
+                messages,
+                model_id_or_path=parse_hf_model_id(llm),
+                gen=HFGenerateKwargs(
+                    max_new_tokens=max_tokens,
+                    temperature=0.0,
+                    top_p=1.0,
+                ),
+            )
+            return text
         body = _build_litellm_body(llm, messages, max_tokens, **extra)
         resp = await litellm.acompletion(**body)
         return resp.choices[0].message.content

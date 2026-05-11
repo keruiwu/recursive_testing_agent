@@ -283,6 +283,10 @@ HF_HUB_OFFLINE=1 uv run python aggregation/aggregate.py \
   output/rollout/<your_rollout_dir>
 ```
 
+You can also use local HF for evaluation judging by setting:
+- `--judge_llm "hf:/path/to/Qwen3-14B"` (or `hf:Qwen/Qwen3-14B` if cached)
+- this avoids requiring `--eval_api_base` / localhost for judge calls.
+
 Note: local HF inference requires `torch` + `transformers`. In this repo those are part of the `rollout` extras:
 `uv sync --extra rollout`.
 
