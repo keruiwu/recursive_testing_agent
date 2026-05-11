@@ -76,6 +76,11 @@ class AggAgent(Strategy):
         self.output_dir = output_dir
         self.resume = resume
         self.skip_score = skip_score
+        self.hf_device_map = kwargs.get("hf_device_map", "auto")
+        self.hf_torch_dtype = kwargs.get("hf_torch_dtype")
+        self.hf_max_new_tokens = kwargs.get("hf_max_new_tokens", 4096)
+        self.hf_temperature = kwargs.get("hf_temperature", 0.2)
+        self.hf_top_p = kwargs.get("hf_top_p", 0.95)
 
         self._log_entries: list[dict] = []
         self._log_lock = threading.Lock()
@@ -143,6 +148,11 @@ class AggAgent(Strategy):
             model=self.model,
             api_base=self.api_base,
             task=self.task,
+            hf_device_map=self.hf_device_map,
+            hf_torch_dtype=self.hf_torch_dtype,
+            hf_max_new_tokens=self.hf_max_new_tokens,
+            hf_temperature=self.hf_temperature,
+            hf_top_p=self.hf_top_p,
         )
 
         max_retries = 3
@@ -319,6 +329,11 @@ class AggAgent(Strategy):
             question = rr[0].get("question", "") if rr else ""
             if question in existing:
                 entries = existing[question]
+                # If any previous combo crashed (e.g. local model load failure),
+                # rerun this problem instead of treating failed logs as final.
+                if any(e.get("error") for e in entries):
+                    new_valid_problems.append((pid, rr))
+                    continue
                 combo_scores = [float(e.get("is_correct") or 0) for e in entries]
                 problem_scores.append(sum(combo_scores) / len(combo_scores))
                 avg_cost = sum(e.get("aggregation_cost", 0.0) for e in entries) / len(entries)

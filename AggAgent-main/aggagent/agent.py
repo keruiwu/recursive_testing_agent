@@ -43,12 +43,22 @@ class AggAgent:
         max_context_tokens: int = 100 * 1024,
         task: str = "",
         llm_kwargs: dict | None = None,
+        hf_device_map: str = "auto",
+        hf_torch_dtype: str | None = None,
+        hf_max_new_tokens: int = 4096,
+        hf_temperature: float = 0.2,
+        hf_top_p: float = 0.95,
     ):
         self.model = model
         self.api_base = api_base or ""
         self.max_context_tokens = max_context_tokens
         self.task = task
         self.llm_kwargs = llm_kwargs or {}
+        self.hf_device_map = hf_device_map
+        self.hf_torch_dtype = hf_torch_dtype
+        self.hf_max_new_tokens = hf_max_new_tokens
+        self.hf_temperature = hf_temperature
+        self.hf_top_p = hf_top_p
 
         variant = "long_form" if task in LONG_FORM_TASKS else ""
         tools = [
@@ -220,7 +230,13 @@ class AggAgent:
             text = hf_chat_completion_text(
                 local_messages,
                 model_id_or_path=parse_hf_model_id(self.model),
-                gen=HFGenerateKwargs(max_new_tokens=4096, temperature=0.2),
+                gen=HFGenerateKwargs(
+                    max_new_tokens=self.hf_max_new_tokens,
+                    temperature=self.hf_temperature,
+                    top_p=self.hf_top_p,
+                    device_map=self.hf_device_map,
+                    torch_dtype=self.hf_torch_dtype,
+                ),
             )
             assistant_msg = {"role": "assistant", "content": text}
             full_messages.append(assistant_msg)

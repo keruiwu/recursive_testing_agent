@@ -2,6 +2,7 @@ from pathlib import Path
 import argparse
 import json
 import os
+import re
 from collections import defaultdict
 from tqdm import tqdm
 
@@ -71,6 +72,15 @@ _LLM_STRATEGY_NAMES = [k for k in STRATEGIES if k not in HEURISTIC_STRATEGIES]
 _SEPARATOR = "  " + "─" * 44
 
 
+def _sanitize_path_tag(raw: str) -> str:
+    """
+    Convert arbitrary identifiers (e.g. hf:/path/to/model) into a safe path tag.
+    """
+    tag = re.sub(r"[^A-Za-z0-9._-]+", "__", raw.strip())
+    tag = tag.strip("._-")
+    return tag or "model"
+
+
 def run_strategy(
     strategy: Strategy, results: dict[str, list[dict]], n: int,
     k_values: list[int] | None = None,
@@ -127,6 +137,18 @@ def main():
                         help="Base URL for vLLM deployment (optional)")
     parser.add_argument("--output_dir", type=str, default="",
                         help="Output directory for logs")
+    parser.add_argument("--cuda_visible_devices", type=str, default=None,
+                        help="Comma-separated GPU ids to expose (e.g. 0,1,2,3)")
+    parser.add_argument("--hf_device_map", type=str, default="auto",
+                        help="Transformers device_map for local hf:* models (default: auto)")
+    parser.add_argument("--hf_torch_dtype", type=str, default=None,
+                        help="Torch dtype for local hf:* models (e.g. bfloat16, float16)")
+    parser.add_argument("--hf_max_new_tokens", type=int, default=4096,
+                        help="Max new tokens for local hf:* generation (default: 4096)")
+    parser.add_argument("--hf_temperature", type=float, default=0.2,
+                        help="Sampling temperature for local hf:* generation (default: 0.2)")
+    parser.add_argument("--hf_top_p", type=float, default=0.95,
+                        help="Top-p for local hf:* generation (default: 0.95)")
     ### Evaluation
     parser.add_argument("--task", type=str, default="browsecomp", choices=["browsecomp", "browsecomp-plus", "deepsearchqa", "hle", "researchrubrics", "healthbench"],
                         help="Task type for judging (default: browsecomp)")
@@ -140,6 +162,8 @@ def main():
 
     if args.strategy in set(_LLM_STRATEGY_NAMES) | {"all"} and args.model is None:
         parser.error(f"--model is required for --strategy {args.strategy}")
+    if args.cuda_visible_devices:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices
 
     # Find all leaf directories from the given parent directories
     all_leaves = []
@@ -166,7 +190,9 @@ def main():
     if args.strategy in _LLM_STRATEGY_NAMES + ["all"]:
         _parts = [p for p in args.directories[0].split("/") if p]
         _dir_tag = "-".join(_parts[-4:]) if _parts else args.directories[0]
-        output_dir = args.output_dir or f"output/aggregation/{args.model}/{_dir_tag}"
+        _model_tag = _sanitize_path_tag(args.model or "model")
+        _dir_tag = _sanitize_path_tag(_dir_tag)
+        output_dir = args.output_dir or f"output/aggregation/{_model_tag}/{_dir_tag}"
         os.makedirs(output_dir, exist_ok=True)
     strategy_kwargs = {
         "model": args.model,
@@ -176,6 +202,11 @@ def main():
         "output_dir": output_dir,
         "resume": True,
         "skip_score": args.skip_score,
+        "hf_device_map": args.hf_device_map,
+        "hf_torch_dtype": args.hf_torch_dtype,
+        "hf_max_new_tokens": args.hf_max_new_tokens,
+        "hf_temperature": args.hf_temperature,
+        "hf_top_p": args.hf_top_p,
     }
 
     k_values = args.k

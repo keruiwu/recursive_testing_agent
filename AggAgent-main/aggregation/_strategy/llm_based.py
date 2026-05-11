@@ -132,7 +132,8 @@ def _construct_interaction(messages: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 def _generate_compact_summary(
-    messages: list[dict], model: str = "gpt-4o-mini", api_base: str | None = None
+    messages: list[dict], model: str = "gpt-4o-mini", api_base: str | None = None,
+    hf_gen_kwargs: dict | None = None,
 ) -> tuple[str, dict]:
     """Summarize a trajectory using REPORT_PROMPT. Returns (summary, usage)."""
     trajectory = _construct_interaction(messages)
@@ -140,10 +141,11 @@ def _generate_compact_summary(
 
     if is_hf_local_model(model):
         # Local HF: no reliable token accounting; keep zeros.
+        hf_gen_kwargs = hf_gen_kwargs or {}
         content = hf_chat_completion_text(
             [{"role": "user", "content": prompt}],
             model_id_or_path=parse_hf_model_id(model),
-            gen=HFGenerateKwargs(max_new_tokens=4096, temperature=0.2),
+            gen=HFGenerateKwargs(**hf_gen_kwargs),
         )
         if not content:
             return "", {"prompt_tokens": 0, "completion_tokens": 0}
@@ -195,6 +197,7 @@ def _integrate_and_answer(
     model: str = "gpt-4o-mini",
     api_base: str | None = None,
     use_report_prompt: bool = False,
+    hf_gen_kwargs: dict | None = None,
 ) -> tuple[str, dict, str]:
     """Integrate reports and produce a final answer. Returns (content, usage, prompt)."""
     prompt_template = INTEGRATE_PROMPT_REPORT if use_report_prompt else INTEGRATE_PROMPT
@@ -203,10 +206,11 @@ def _integrate_and_answer(
         prompt += f"\n\n## Report {i}\n{report}"
 
     if is_hf_local_model(model):
+        hf_gen_kwargs = hf_gen_kwargs or {}
         content = hf_chat_completion_text(
             [{"role": "user", "content": prompt}],
             model_id_or_path=parse_hf_model_id(model),
-            gen=HFGenerateKwargs(max_new_tokens=4096, temperature=0.2),
+            gen=HFGenerateKwargs(**hf_gen_kwargs),
         )
         if content:
             content = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", content)
@@ -281,6 +285,13 @@ class SolAgg(Strategy):
         self.skip_score = skip_score
         self.resume = resume
         self.compact = False  # overridden by SummAgg
+        self.hf_gen_kwargs = {
+            "device_map": kwargs.get("hf_device_map", "auto"),
+            "torch_dtype": kwargs.get("hf_torch_dtype"),
+            "max_new_tokens": kwargs.get("hf_max_new_tokens", 4096),
+            "temperature": kwargs.get("hf_temperature", 0.2),
+            "top_p": kwargs.get("hf_top_p", 0.95),
+        }
 
         self._log_entries: list[dict] = []
         self._log_lock = threading.Lock()
@@ -357,7 +368,10 @@ class SolAgg(Strategy):
                     messages = r.get("messages", [])
                     if messages:
                         return _generate_compact_summary(
-                            messages, model=self.model, api_base=self.api_base
+                            messages,
+                            model=self.model,
+                            api_base=self.api_base,
+                            hf_gen_kwargs=self.hf_gen_kwargs,
                         )
                     return None, {"prompt_tokens": 0, "completion_tokens": 0}
 
@@ -381,6 +395,7 @@ class SolAgg(Strategy):
                     model=self.model,
                     api_base=self.api_base,
                     use_report_prompt=self.task in ("healthbench", "researchrubrics"),
+                    hf_gen_kwargs=self.hf_gen_kwargs,
                 )
                 elapsed = time.time() - t_start
                 combo_llm_cost += self._calculate_llm_cost(usage)

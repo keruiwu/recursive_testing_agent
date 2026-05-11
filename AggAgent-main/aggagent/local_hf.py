@@ -62,6 +62,7 @@ def _torch_dtype_from_str(dtype: str | None):
 def _load_tokenizer_and_model(model_id_or_path: str, *, device_map: str, torch_dtype: str | None):
     # Lazy import to avoid hard dependency
     from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
+    import torch
 
     # Respect offline mode if user has downloaded weights.
     # (If they pass a repo id without local cache, this may still fail.)
@@ -73,13 +74,32 @@ def _load_tokenizer_and_model(model_id_or_path: str, *, device_map: str, torch_d
         local_files_only=local_files_only,
     )
     dtype_obj = _torch_dtype_from_str(torch_dtype)
-    mdl = AutoModelForCausalLM.from_pretrained(
-        model_id_or_path,
-        trust_remote_code=True,
-        local_files_only=local_files_only,
-        device_map=device_map,
-        torch_dtype=dtype_obj,
-    )
+
+    # Primary path: use device_map (multi-device/sharded) when available.
+    # Fallback path: if Accelerate is not installed, load without device_map.
+    load_kwargs: dict = {
+        "trust_remote_code": True,
+        "local_files_only": local_files_only,
+        "torch_dtype": dtype_obj,
+    }
+    try:
+        mdl = AutoModelForCausalLM.from_pretrained(
+            model_id_or_path,
+            device_map=device_map,
+            **load_kwargs,
+        )
+    except Exception as e:
+        msg = str(e).lower()
+        needs_accelerate = "requires `accelerate`" in msg or "requires accelerate" in msg
+        if not needs_accelerate:
+            raise
+
+        mdl = AutoModelForCausalLM.from_pretrained(
+            model_id_or_path,
+            **load_kwargs,
+        )
+        target_device = "cuda" if torch.cuda.is_available() else "cpu"
+        mdl = mdl.to(target_device)
     return tok, mdl
 
 
