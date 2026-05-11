@@ -127,7 +127,9 @@ def main():
     parser.add_argument("--strategy", type=str, default="heuristic", choices=strategy_choices,
                         help="Evaluation strategy (default: heuristic)")
     parser.add_argument("--max_workers", type=int, default=10,
-                        help="Number of parallel workers (default: 10)")
+                        help="Parallel workers over problems (default: 10). For local hf:* models, "
+                        "GPU inference is serialized for correctness; use 1 unless you need overlap "
+                        "with non-GPU work.")
     parser.add_argument("--k", type=int, nargs="+", default=None,
                         help="k values to evaluate (e.g. --k 1 2 4). If not set, runs all k=1,2,4,...,N")
     ### LLM-based Aggregation

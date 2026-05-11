@@ -40,6 +40,8 @@ class HFGenerateKwargs:
 
 _CACHE_LOCK = threading.Lock()
 _MODEL_CACHE: dict[str, tuple[object, object]] = {}
+# One sharded HF model cannot safely run concurrent `generate()` from multiple threads.
+_FORWARD_LOCK = threading.Lock()
 
 
 def _torch_dtype_from_str(dtype: str | None):
@@ -116,29 +118,31 @@ def get_hf_client(model_id_or_path: str, *, device_map: str = "auto", torch_dtyp
         {"id": model_id_or_path, "device_map": device_map, "torch_dtype": torch_dtype},
         sort_keys=True,
     )
+    # Hold lock for the whole load path so two threads never load the same weights twice.
     with _CACHE_LOCK:
         if key in _MODEL_CACHE:
             return _MODEL_CACHE[key]
-    tok, mdl = _load_tokenizer_and_model(model_id_or_path, device_map=device_map, torch_dtype=torch_dtype)
-    hf_device_map = getattr(mdl, "hf_device_map", None)
-    if hf_device_map:
-        devices = sorted({str(v) for v in hf_device_map.values()})
-        print(
-            f"[local_hf] loaded model='{model_id_or_path}' with device_map='{device_map}', "
-            f"torch_dtype='{torch_dtype}', shards_on={devices}"
+        tok, mdl = _load_tokenizer_and_model(
+            model_id_or_path, device_map=device_map, torch_dtype=torch_dtype
         )
-    else:
-        try:
-            single_device = str(next(mdl.parameters()).device)
-        except Exception:
-            single_device = "unknown"
-        print(
-            f"[local_hf] loaded model='{model_id_or_path}' with device_map='{device_map}', "
-            f"torch_dtype='{torch_dtype}', single_device='{single_device}'"
-        )
-    with _CACHE_LOCK:
+        hf_device_map = getattr(mdl, "hf_device_map", None)
+        if hf_device_map:
+            devices = sorted({str(v) for v in hf_device_map.values()})
+            print(
+                f"[local_hf] loaded model='{model_id_or_path}' with device_map='{device_map}', "
+                f"torch_dtype='{torch_dtype}', shards_on={devices}"
+            )
+        else:
+            try:
+                single_device = str(next(mdl.parameters()).device)
+            except Exception:
+                single_device = "unknown"
+            print(
+                f"[local_hf] loaded model='{model_id_or_path}' with device_map='{device_map}', "
+                f"torch_dtype='{torch_dtype}', single_device='{single_device}'"
+            )
         _MODEL_CACHE[key] = (tok, mdl)
-    return tok, mdl
+        return tok, mdl
 
 
 def _fallback_chat_prompt(messages: list[dict]) -> str:
@@ -168,39 +172,46 @@ def hf_chat_completion_text(
             "Try: `uv sync --extra rollout` (or install torch+transformers manually)."
         ) from e
 
-    tok, mdl = get_hf_client(model_id_or_path, device_map=gen.device_map, torch_dtype=gen.torch_dtype)
+    # Serialize all forward passes: concurrent generate() on one Accelerate-sharded
+    # model is unsafe and previously caused duplicate loads + bogus 0% metrics.
+    with _FORWARD_LOCK:
+        tok, mdl = get_hf_client(
+            model_id_or_path, device_map=gen.device_map, torch_dtype=gen.torch_dtype
+        )
 
-    if hasattr(tok, "apply_chat_template") and getattr(tok, "chat_template", None):
-        prompt = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    else:
-        prompt = _fallback_chat_prompt(messages)
+        if hasattr(tok, "apply_chat_template") and getattr(tok, "chat_template", None):
+            prompt = tok.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        else:
+            prompt = _fallback_chat_prompt(messages)
 
-    inputs = tok(prompt, return_tensors="pt")
+        inputs = tok(prompt, return_tensors="pt")
 
-    # Some setups use device_map="auto" and place modules on multiple devices.
-    # Token tensors need to be on a device accepted by the model; we pick the
-    # embedding device when possible, otherwise fallback to first param device.
-    try:
-        device = next(mdl.parameters()).device
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-    except Exception:
-        pass
+        # Some setups use device_map="auto" and place modules on multiple devices.
+        # Token tensors need to be on a device accepted by the model; we pick the
+        # embedding device when possible, otherwise fallback to first param device.
+        try:
+            device = next(mdl.parameters()).device
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+        except Exception:
+            pass
 
-    generate_kwargs: dict = {
-        "max_new_tokens": gen.max_new_tokens,
-        "do_sample": gen.temperature > 0,
-        "temperature": gen.temperature,
-        "top_p": gen.top_p,
-    }
-    if gen.repetition_penalty is not None:
-        generate_kwargs["repetition_penalty"] = gen.repetition_penalty
+        generate_kwargs: dict = {
+            "max_new_tokens": gen.max_new_tokens,
+            "do_sample": gen.temperature > 0,
+            "temperature": gen.temperature,
+            "top_p": gen.top_p,
+        }
+        if gen.repetition_penalty is not None:
+            generate_kwargs["repetition_penalty"] = gen.repetition_penalty
 
-    with torch.inference_mode():
-        out = mdl.generate(**inputs, **generate_kwargs)
+        with torch.inference_mode():
+            out = mdl.generate(**inputs, **generate_kwargs)
 
-    # Decode only newly generated tokens if possible
-    input_len = inputs["input_ids"].shape[-1]
-    gen_tokens = out[0][input_len:]
-    text = tok.decode(gen_tokens, skip_special_tokens=True)
-    return (text or "").strip()
+        # Decode only newly generated tokens if possible
+        input_len = inputs["input_ids"].shape[-1]
+        gen_tokens = out[0][input_len:]
+        text = tok.decode(gen_tokens, skip_special_tokens=True)
+        return (text or "").strip()
 
