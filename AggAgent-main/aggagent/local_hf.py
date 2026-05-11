@@ -93,11 +93,19 @@ def _load_tokenizer_and_model(model_id_or_path: str, *, device_map: str, torch_d
         needs_accelerate = "requires `accelerate`" in msg or "requires accelerate" in msg
         if not needs_accelerate:
             raise
+        allow_single_gpu_fallback = os.getenv("HF_LOCAL_ALLOW_SINGLE_GPU_FALLBACK", "").lower() in ("1", "true", "yes")
+        if not allow_single_gpu_fallback:
+            raise RuntimeError(
+                "Local HF multi-GPU loading requested (device_map='auto') but `accelerate` is missing. "
+                "Install accelerate to shard across GPUs: `pip install accelerate` (or `uv sync --extra rollout`). "
+                "If you intentionally want single-GPU fallback, set HF_LOCAL_ALLOW_SINGLE_GPU_FALLBACK=1."
+            ) from e
 
-        mdl = AutoModelForCausalLM.from_pretrained(
-            model_id_or_path,
-            **load_kwargs,
+        print(
+            "[local_hf] Warning: `accelerate` not available; falling back to single-device model load. "
+            "This may cause GPU OOM on large models."
         )
+        mdl = AutoModelForCausalLM.from_pretrained(model_id_or_path, **load_kwargs)
         target_device = "cuda" if torch.cuda.is_available() else "cpu"
         mdl = mdl.to(target_device)
     return tok, mdl
@@ -112,6 +120,22 @@ def get_hf_client(model_id_or_path: str, *, device_map: str = "auto", torch_dtyp
         if key in _MODEL_CACHE:
             return _MODEL_CACHE[key]
     tok, mdl = _load_tokenizer_and_model(model_id_or_path, device_map=device_map, torch_dtype=torch_dtype)
+    hf_device_map = getattr(mdl, "hf_device_map", None)
+    if hf_device_map:
+        devices = sorted({str(v) for v in hf_device_map.values()})
+        print(
+            f"[local_hf] loaded model='{model_id_or_path}' with device_map='{device_map}', "
+            f"torch_dtype='{torch_dtype}', shards_on={devices}"
+        )
+    else:
+        try:
+            single_device = str(next(mdl.parameters()).device)
+        except Exception:
+            single_device = "unknown"
+        print(
+            f"[local_hf] loaded model='{model_id_or_path}' with device_map='{device_map}', "
+            f"torch_dtype='{torch_dtype}', single_device='{single_device}'"
+        )
     with _CACHE_LOCK:
         _MODEL_CACHE[key] = (tok, mdl)
     return tok, mdl
