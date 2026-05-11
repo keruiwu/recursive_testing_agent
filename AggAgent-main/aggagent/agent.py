@@ -13,6 +13,7 @@ from .tools import (
     SearchTrajectoriesTool, FinishTool,
     format_metadata, _count_tokens_approx,
 )
+from .local_hf import is_hf_local_model, parse_hf_model_id, hf_chat_completion_text, HFGenerateKwargs
 from .prompts import (
     SYSTEM_PROMPT_AGGAGENT, USER_PROMPT_AGGAGENT,
     SYSTEM_PROMPT_AGGAGENT_QWEN,
@@ -116,6 +117,12 @@ class AggAgent:
     def call_server(self, messages, max_tries=5, only_finish=False):
         base_sleep_time = 1
         tools = self.tool_description if not only_finish else [self.tool_map["finish"].get_tool_definitions()]
+
+        # Local HF path does not support tool-calling in OpenAI format here.
+        # We intentionally short-circuit and rely on the direct aggregation path in _run.
+        if is_hf_local_model(self.model):
+            return "LocalHFMode"
+
         if self.llm_kwargs:
             litellm_kwargs = {**self.llm_kwargs, "messages": messages,"tools": tools}
         else:
@@ -196,6 +203,45 @@ class AggAgent:
             "token_usage_each_step": [],
         }
 
+        # ------------------------------------------------------------------
+        # Local HF direct mode: single-shot aggregation (no tool calls)
+        # ------------------------------------------------------------------
+        if is_hf_local_model(self.model):
+            local_system = system_prompt
+            local_user = (
+                user_prompt
+                + "\n\nImportant: You cannot call any tools. Produce the final result directly.\n"
+                + 'Return ONLY a JSON object like {"solution": "...", "reason": "..."}.\n'
+            )
+            local_messages = [
+                {"role": "system", "content": local_system},
+                {"role": "user", "content": local_user},
+            ]
+            text = hf_chat_completion_text(
+                local_messages,
+                model_id_or_path=parse_hf_model_id(self.model),
+                gen=HFGenerateKwargs(max_new_tokens=4096, temperature=0.2),
+            )
+            assistant_msg = {"role": "assistant", "content": text}
+            full_messages.append(assistant_msg)
+
+            # Parse JSON result
+            result = None
+            try:
+                match = re.search(r"\{[\s\S]*\}", text)
+                if match:
+                    result = json.loads(match.group(0))
+            except Exception:
+                result = None
+
+            if not isinstance(result, dict) or "solution" not in result:
+                return self._make_output(
+                    None,
+                    full_messages,
+                    {**stats, "server_errors": 1},
+                )
+            return self._make_output(result, full_messages, stats)
+
         def store_token_usage(response, iteration):
             if response is None or isinstance(response, str):
                 entry = {"iteration": iteration, "input_tokens": None, "output_tokens": None}
@@ -214,6 +260,13 @@ class AggAgent:
             stats["iterations"] = iteration
             response = self.call_server(messages)
             store_token_usage(response, iteration)
+
+            if response == "LocalHFMode":
+                stats["server_errors"] += 1
+                error_message = {"role": "assistant", "content": "Local HF mode does not support tool-calling loop."}
+                messages.append(error_message)
+                full_messages.append(error_message)
+                return self._make_output(None, full_messages, stats)
 
             if response == "ContextLengthError":
                 stats["context_limit_reached"] = True

@@ -257,6 +257,27 @@ uv run python aggregation/aggregate.py \
   output/rollout/GLM-4.7-Flash/browsecomp
 ```
 
+### Using a downloaded local HF model (no API / no vLLM server)
+
+You can run aggregation directly on a local HuggingFace model by prefixing the model with `hf:` (or `hf/`).
+The value after the prefix can be either:
+
+- a **local directory** (e.g. `hf:/path/to/Qwen3-14B`)
+- a **Hub repo id** (e.g. `hf:Qwen/Qwen3-14B`) if it is already cached locally
+
+Example (SolAgg / SummAgg / AggAgent):
+
+```bash
+HF_HUB_OFFLINE=1 uv run python aggregation/aggregate.py \
+  --strategy solagg \
+  --model "hf:/abs/path/to/Qwen3-14B" \
+  --task browsecomp \
+  output/rollout/<your_rollout_dir>
+```
+
+Note: local HF inference requires `torch` + `transformers`. In this repo those are part of the `rollout` extras:
+`uv sync --extra rollout`.
+
 ---
 
 ## AggAgent Package

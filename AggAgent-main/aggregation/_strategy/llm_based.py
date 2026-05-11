@@ -12,6 +12,7 @@ import litellm
 from tqdm import tqdm
 
 from .base import Strategy, MODEL_COSTS, CostBreakdown, _compute_score
+from aggagent.local_hf import is_hf_local_model, parse_hf_model_id, hf_chat_completion_text, HFGenerateKwargs
 
 
 REPORT_PROMPT = """Given the following problem-solving trajectory:
@@ -137,6 +138,20 @@ def _generate_compact_summary(
     trajectory = _construct_interaction(messages)
     prompt = REPORT_PROMPT.format(traj=trajectory)
 
+    if is_hf_local_model(model):
+        # Local HF: no reliable token accounting; keep zeros.
+        content = hf_chat_completion_text(
+            [{"role": "user", "content": prompt}],
+            model_id_or_path=parse_hf_model_id(model),
+            gen=HFGenerateKwargs(max_new_tokens=4096, temperature=0.2),
+        )
+        if not content:
+            return "", {"prompt_tokens": 0, "completion_tokens": 0}
+        match = re.search(r"<report>(.*?)</report>", content, re.DOTALL)
+        if match:
+            return match.group(1).strip(), {"prompt_tokens": 0, "completion_tokens": 0}
+        return content, {"prompt_tokens": 0, "completion_tokens": 0}
+
     kwargs: dict = {
         "model": "hosted_vllm/" + model,
         "messages": [{"role": "user", "content": prompt}],
@@ -186,6 +201,16 @@ def _integrate_and_answer(
     prompt = prompt_template.format(question=question)
     for i, report in enumerate(reports, 1):
         prompt += f"\n\n## Report {i}\n{report}"
+
+    if is_hf_local_model(model):
+        content = hf_chat_completion_text(
+            [{"role": "user", "content": prompt}],
+            model_id_or_path=parse_hf_model_id(model),
+            gen=HFGenerateKwargs(max_new_tokens=4096, temperature=0.2),
+        )
+        if content:
+            content = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", content)
+        return content or "", {"prompt_tokens": 0, "completion_tokens": 0}, prompt
 
     kwargs: dict = {
         "model": "hosted_vllm/" + model,
