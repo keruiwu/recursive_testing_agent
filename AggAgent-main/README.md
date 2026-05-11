@@ -271,6 +271,8 @@ Example (SolAgg / SummAgg / AggAgent):
 HF_HUB_OFFLINE=1 uv run python aggregation/aggregate.py \
   --strategy solagg \
   --model "hf:/abs/path/to/Qwen3-14B" \
+  --judge_llm "Qwen/Qwen3.5-122B-A10B" \
+  --eval_api_base "http://localhost:6000/v1" \
   --cuda_visible_devices 0,1,2,3 \
   --hf_device_map auto \
   --hf_torch_dtype bfloat16 \

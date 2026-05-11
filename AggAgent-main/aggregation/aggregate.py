@@ -154,6 +154,10 @@ def main():
                         help="Task type for judging (default: browsecomp)")
     parser.add_argument("--skip_score", action="store_true",
                         help="Skip compute_score during aggregation; score posthoc from logs")
+    parser.add_argument("--judge_llm", type=str, default="gpt-4.1",
+                        help="Judge model used by evaluation compute_score (default: gpt-4.1)")
+    parser.add_argument("--eval_api_base", type=str, default=None,
+                        help="Override EVAL_API_BASE for Qwen/vLLM evaluation judge")
 
     parser.add_argument("directories", nargs="+",
                         help="Parent directories to search for leaf directories (json)")
@@ -164,6 +168,8 @@ def main():
         parser.error(f"--model is required for --strategy {args.strategy}")
     if args.cuda_visible_devices:
         os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices
+    if args.eval_api_base:
+        os.environ["EVAL_API_BASE"] = args.eval_api_base
 
     # Find all leaf directories from the given parent directories
     all_leaves = []
@@ -202,6 +208,7 @@ def main():
         "output_dir": output_dir,
         "resume": True,
         "skip_score": args.skip_score,
+        "judge_llm": args.judge_llm,
         "hf_device_map": args.hf_device_map,
         "hf_torch_dtype": args.hf_torch_dtype,
         "hf_max_new_tokens": args.hf_max_new_tokens,

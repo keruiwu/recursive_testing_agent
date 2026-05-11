@@ -285,6 +285,7 @@ class SolAgg(Strategy):
         self.skip_score = skip_score
         self.resume = resume
         self.compact = False  # overridden by SummAgg
+        self.judge_llm = kwargs.get("judge_llm", "gpt-4.1")
         self.hf_gen_kwargs = {
             "device_map": kwargs.get("hf_device_map", "auto"),
             "torch_dtype": kwargs.get("hf_torch_dtype"),
@@ -404,7 +405,9 @@ class SolAgg(Strategy):
                     judge_result = None
                     is_correct = None
                 else:
-                    judge_result = _compute_score(integrated_response, item, self.task)
+                    judge_result = _compute_score(
+                        integrated_response, item, self.task, llm=self.judge_llm
+                    )
                     is_correct = self.is_correct({"auto_judge": judge_result})
                     pass_count += is_correct
 

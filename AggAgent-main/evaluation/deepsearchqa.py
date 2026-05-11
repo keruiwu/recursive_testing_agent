@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import os
 import re
 import textwrap
 from typing import Dict, List, Tuple
@@ -10,7 +9,7 @@ from typing import Dict, List, Tuple
 import litellm
 from dotenv import load_dotenv
 
-from .base import Evaluator
+from .base import Evaluator, _build_litellm_body
 
 load_dotenv()
 
@@ -237,20 +236,11 @@ class DeepSearchQAEvaluator(Evaluator):
 
         judge_prompt = self.build_prompt(prediction, item)
 
-        body = {
-            "model": "gpt-4.1",
-            "max_tokens": 1024,
-            "messages": [{"role": "user", "content": judge_prompt}]
-        }
-
-        if "gemini" in llm:
-            body["model"] = f"gemini/{llm}"
-            body["api_key"] = os.getenv("GEMINI_API_KEY")
-        elif "gpt" in llm:
-            body["model"] = f"openai/{llm}"
-            body["api_key"] = os.getenv("OPENAI_API_KEY")
-        else:
-            body["api_key"] = "EMPTY"
+        body = _build_litellm_body(
+            llm=llm,
+            messages=[{"role": "user", "content": judge_prompt}],
+            max_tokens=1024,
+        )
 
         try:
             judge_response = await litellm.acompletion(**body)

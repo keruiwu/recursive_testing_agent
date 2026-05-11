@@ -76,6 +76,7 @@ class AggAgent(Strategy):
         self.output_dir = output_dir
         self.resume = resume
         self.skip_score = skip_score
+        self.judge_llm = kwargs.get("judge_llm", "gpt-4.1")
         self.hf_device_map = kwargs.get("hf_device_map", "auto")
         self.hf_torch_dtype = kwargs.get("hf_torch_dtype")
         self.hf_max_new_tokens = kwargs.get("hf_max_new_tokens", 4096)
@@ -214,7 +215,7 @@ class AggAgent(Strategy):
             judgement = None
             is_correct = None
         else:
-            judgement = _compute_score(prediction, item, self.task)
+            judgement = _compute_score(prediction, item, self.task, llm=self.judge_llm)
             is_correct = self.is_correct({"auto_judge": judgement})
 
         log_entry = {
