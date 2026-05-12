@@ -13,7 +13,7 @@ python aggregation/aggregate.py \
   --judge_llm "hf:/gpfs/u/scratch/MPRG/MPRGhhzz/kerui/models/Qwen3-14B" \
   --task deepsearchqa \
   --k 4 \
-  --max_workers 2 \
+  --max_workers 4 \
   --hf_device_map auto \
   --hf_torch_dtype float16 \
   --hf_max_new_tokens 4096 \
