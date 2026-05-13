@@ -6,7 +6,7 @@ export HF_HUB_OFFLINE=1
 export HF_LOCAL_DEVICE_MAP=auto
 export HF_LOCAL_TORCH_DTYPE=float16
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 python aggregation/aggregate.py \
   --strategy aggagent \
   --model "hf:/gpfs/u/scratch/MPRG/MPRGhhzz/kerui/models/Qwen3-14B" \
